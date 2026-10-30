@@ -12,6 +12,10 @@ An OLED display provides real-time distance and system status information.
 
 The ESP32 also connects to Wi-Fi and uploads sensor readings to the ThingSpeak cloud platform for remote monitoring.
 
+## Wokwi Simulation
+
+[Click here to view and run the project on Wokwi](https://wokwi.com/projects/477967044546918401)
+
 ## 2. Objectives
 
 - Develop an automatic distance monitoring system.
