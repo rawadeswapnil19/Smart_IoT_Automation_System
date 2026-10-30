@@ -1,0 +1,241 @@
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
+
+// OLED Configuration
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET -1
+#define OLED_ADDRESS 0x3C
+
+Adafruit_SSD1306 display(
+  SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET
+);
+
+// Sensor and Buzzer Pins
+#define TRIG_PIN 5
+#define ECHO_PIN 18
+#define BUZZER_PIN 25
+
+// WiFi Configuration
+const char* ssid = "Wokwi-GUEST";
+const char* password = "";
+
+
+// ThingSpeak Configuration
+const char* server = "http://api.thingspeak.com/update";
+
+String apiKey = "YOUR_WRITE_API_KEY";
+
+// Variables
+float distanceCM = 0;
+
+String status = "";
+String buzzerStatus = "";
+
+int statusCode = 0;
+int buzzerCode = 0;
+
+unsigned long lastUpload = 0;
+const unsigned long uploadInterval = 20000;
+
+void setup() {
+
+  Serial.begin(115200);
+
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+
+  digitalWrite(TRIG_PIN, LOW);
+  digitalWrite(BUZZER_PIN, LOW);
+
+  // Initialize OLED
+  Wire.begin(21, 22);
+
+  if (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDRESS)) {
+    Serial.println("OLED initialization failed!");
+    while (true) {
+      delay(100);
+    }
+  }
+
+  display.clearDisplay();
+  display.setTextColor(SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setCursor(0, 0);
+  display.println("SMART IoT SYSTEM");
+  display.println("Initializing...");
+  display.display();
+
+  // Connect to WiFi
+  Serial.println("Connecting to WiFi...");
+  WiFi.mode(WIFI_STA);
+  WiFi.begin(ssid, password, 6);
+  unsigned long startTime = millis();
+
+  while (WiFi.status() != WL_CONNECTED &&
+         millis() - startTime < 15000) {
+    delay(500);
+    Serial.print(".");
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.println("\nWiFi Connected!");
+    Serial.println(WiFi.localIP());
+  } else {
+    Serial.println("\nWiFi connection failed!");
+  }
+
+  delay(1500);
+}
+
+void loop() {
+
+  // Measure Distance
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+
+  digitalWrite(TRIG_PIN, LOW);
+
+  unsigned long duration = pulseIn(ECHO_PIN, HIGH, 30000);
+
+  if (duration == 0) {
+    distanceCM = -1;
+  } else {
+    distanceCM = duration * 0.0343 / 2.0;
+  }
+
+  // AUTOMATION LOGIC
+
+  if (distanceCM < 0) {
+
+    status = "NO READING";
+    buzzerStatus = "OFF";
+
+    statusCode = 0;
+    buzzerCode = 0;
+
+    noTone(BUZZER_PIN);
+
+  }
+
+  else if (distanceCM > 50) {
+
+    status = "SAFE";
+    buzzerStatus = "OFF";
+
+    statusCode = 1;
+    buzzerCode = 0;
+
+    noTone(BUZZER_PIN);
+
+  }
+
+  else if (distanceCM >= 20) {
+
+    status = "OBJECT NEAR";
+    buzzerStatus = "OFF";
+
+    statusCode = 2;
+    buzzerCode = 0;
+
+    noTone(BUZZER_PIN);
+
+  }
+
+  else {
+
+    status = "DANGER";
+    buzzerStatus = "ON";
+
+    statusCode = 3;
+    buzzerCode = 1;
+
+    tone(BUZZER_PIN, 2000);
+
+  }
+
+  // OLED DISPLAY
+
+  display.clearDisplay();
+  display.setCursor(0, 0);
+  display.setTextSize(1);
+
+  display.println("SMART IoT SYSTEM");
+  display.println("----------------");
+
+  if (distanceCM < 0) {
+    display.println("Distance: N/A");
+  } else {
+    display.print("Distance: ");
+    display.print(distanceCM, 1);
+    display.println(" cm");
+  }
+
+  display.print("Status: ");
+  display.println(status);
+
+  display.print("Buzzer: ");
+  display.println(buzzerStatus);
+
+  display.print("WiFi: ");
+  display.println(
+    WiFi.status() == WL_CONNECTED ? "CONNECTED" : "OFFLINE"
+  );
+
+  display.display();
+
+  // SERIAL MONITOR
+
+  Serial.print("Distance: ");
+  Serial.print(distanceCM);
+
+  Serial.print(" cm | Status: ");
+  Serial.print(status);
+
+  Serial.print(" | Buzzer: ");
+  Serial.println(buzzerStatus);
+
+  // THINGSPEAK CLOUD UPLOAD
+
+  if (millis() - lastUpload >= uploadInterval) {
+
+    lastUpload = millis();
+
+    if (WiFi.status() == WL_CONNECTED && distanceCM >= 0) {
+
+      WiFiClient client;
+      HTTPClient http;
+
+      String url = String(server) +
+        "?api_key=" + apiKey +
+        "&field1=" + String(distanceCM, 1) +
+        "&field2=" + String(statusCode) +
+        "&field3=" + String(buzzerCode);
+
+      http.begin(client, url);
+
+      int httpResponseCode = http.GET();
+
+      Serial.print("ThingSpeak Response: ");
+      Serial.println(httpResponseCode);
+
+      if (httpResponseCode > 0) {
+        Serial.println("Cloud Data Uploaded Successfully!");
+      }
+
+      http.end();
+
+    } else {
+      Serial.println("WiFi Offline or Invalid Sensor Reading");
+    }
+  }
+
+  delay(300);
+}
